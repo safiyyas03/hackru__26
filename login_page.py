@@ -1,112 +1,42 @@
-import os
+from flask import Flask, render_template, request, redirect, url_for, session
 import pandas as pd
-from flask import Flask, request, jsonify, session
-from flask_cors import CORS
+import os
 
 app = Flask(__name__)
+app.secret_key = 'your_secret_key_here' # Needed for session management
 
-app.secret_key = os.environ.get(
-    "FLASK_SECRET_KEY",
-    "local-development-only-change-me"
-)
+EXCEL_FILE = 'users.xlsx'
 
-# Allow frontend development server
-CORS(
-    app,
-    origins=["http://localhost:3000", "http://localhost:5173"],
-    supports_credentials=True
-)
+@app.route('/')
+def home():
+    # Renders your HTML login page (expects login.html in a 'templates' folder)
+    return render_template('login.html')
 
-EXCEL_FILE = "students.xlsx"
-
-
-def get_students():
-    df = pd.read_excel(EXCEL_FILE, dtype=str)
-    df.columns = df.columns.str.strip()
-    return df.fillna("NA")
-
-
-@app.route("/api/login", methods=["POST"])
+@app.route('/login', methods=['POST'])
 def login():
-    data = request.get_json(silent=True) or {}
+    netid = request.form.get('netid')
+    password = request.form.get('password')
+    
+    if not os.path.exists(EXCEL_FILE):
+        return "Database file not found!", 500
+    
+    # Read the Excel file
+    df = pd.read_excel(EXCEL_FILE)
+    
+    # Check if netid and password match any row
+    # (Ensure column names in Excel match 'netid' and 'password')
+    user = df[(df['netid'].astype(str) == netid) & (df['password'].astype(str) == password)]
+    
+    if not user.empty:
+        session['netid'] = netid
+        return f"Login successful! Welcome back, {netid}."
+    else:
+        return render_template('login.html', error="Invalid NetID or Password")
 
-    netid = data.get("netid", "").strip()
-    password = data.get("password", "")
-
-    if not netid or not password:
-        return jsonify({
-            "success": False,
-            "message": "NetID and password required"
-        }), 400
-
-    df = get_students()
-
-    student = df[
-        (df["NetID"] == netid) &
-        (df["Password"] == password)
-    ]
-
-    if student.empty:
-        return jsonify({
-            "success": False,
-            "message": "Invalid NetID or password"
-        }), 401
-
-    user = student.iloc[0]
-
-    session.clear()
-    session["netid"] = user["NetID"]
-
-    return jsonify({
-        "success": True,
-        "message": "Login successful",
-        "student": {
-            "netid": user["NetID"],
-            "first_name": user["First_Name"],
-            "last_name": user["Last_Name"]
-        }
-    }), 200
-
-
-@app.route("/api/student", methods=["GET"])
-def student_info():
-    if "netid" not in session:
-        return jsonify({
-            "success": False,
-            "message": "Not authenticated"
-        }), 401
-
-    df = get_students()
-    student = df[df["NetID"] == session["netid"]]
-
-    if student.empty:
-        session.clear()
-        return jsonify({
-            "success": False,
-            "message": "Student not found"
-        }), 404
-
-    user = student.iloc[0]
-
-    return jsonify({
-        "netid": user["NetID"],
-        "first_name": user["First_Name"],
-        "last_name": user["Last_Name"],
-        "gender": user["Gender"],
-        "grad_year": user["Grad_Year"],
-        "major": user["Major"],
-        "attendance": user["Attendence"]
-    }), 200
-
-
-@app.route("/api/logout", methods=["POST"])
+@app.route('/logout')
 def logout():
-    session.clear()
-    return jsonify({
-        "success": True,
-        "message": "Logged out successfully"
-    }), 200
+    session.pop('netid', None)
+    return redirect(url_for('home'))
 
-
-if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+if __name__ == '__main__':
+    app.run(debug=True)
